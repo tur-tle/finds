@@ -1,0 +1,18 @@
+#!/bin/sh
+
+searchCwd(){
+    
+    if [ -z "$2" ]; then
+        SEARCHPATH='.'
+    else
+        SEARCHPATH=$2
+    fi
+    echo "Searching for:$1 $SEARCHPATH"
+    find $SEARCHPATH -iname "*$1*" -not -path '*/\.*' -type f \( ! -iname ".*" \)
+}
+
+if [ -z "$1" ]; then
+              echo "usage: finds 'search term' [path]"
+            exit
+else   searchCwd $1 $2       
+fi
