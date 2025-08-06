@@ -1,18 +1,69 @@
-#!/bin/sh
+#!/bin/bash
 
-searchCwd(){
-    
-    if [ -z "$2" ]; then
-        SEARCHPATH='.'
-    else
-        SEARCHPATH=$2
-    fi
-    echo "Searching for:$1 $SEARCHPATH"
-    find $SEARCHPATH -iname "*$1*" -not -path '*/\.*' -type f \( ! -iname ".*" \)
+print_time=false
+search_path=""
+search_term=""
+
+usage() {
+    echo "Usage: $0 [search_term] [path] [-s <term>] [-p <path>] [-t] [-h]"
+    echo "  [search_term]   Default search term if -s is not used"
+    echo "  [path]          Default path if -p is not used"
+    echo "  -s <term>       Search term (overrides positional)"
+    echo "  -p <path>       Search path (overrides positional)"
+    echo "  -t              Print modification time"
+    echo "  -h              Show this help message"
+    exit 1
 }
 
-if [ -z "$1" ]; then
-              echo "usage: finds 'search term' [path]"
-            exit
-else   searchCwd $1 $2       
+# First, capture positional args before getopts
+pos_args=()
+
+while [[ $# -gt 0 && $1 != -* ]]; do
+    pos_args+=("$1")
+    shift
+done
+
+# Apply positional args if set
+if [ "${#pos_args[@]}" -ge 1 ]; then
+    search_term="${pos_args[0]}"
+fi
+if [ "${#pos_args[@]}" -ge 2 ]; then
+    search_path="${pos_args[1]}"
+fi
+
+# Parse options
+while getopts "s:p:th" opt; do
+    case $opt in
+        s) search_term="$OPTARG" ;;
+        p) search_path="$OPTARG" ;;
+        t) print_time=true ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+
+# Default path if unset
+[ -z "$search_path" ] && search_path="."
+
+# Show usage if nothing to search for
+if [ -z "$search_term" ]; then
+    echo "Error: No search term provided."
+    usage
+fi
+
+echo "Searching for: \"$search_term\" in \"$search_path\""
+
+# Run find
+
+if $print_time; then
+    find "$search_path" -iname "*$search_term*" -not -path '*/\.*' -type f \
+        \( ! -iname ".*" \) -printf '%p %TY-%Tm-%Td %TH:%TM\n' \
+    | awk '{
+        file=$1;
+        for (i=2; i<=NF-2; i++) file=file " " $i;
+        printf "%-60s %s %s\n", file, $(NF-1), $NF
+    }'
+else
+    find "$search_path" -iname "*$search_term*" -not -path '*/\.*' -type f \
+        \( ! -iname ".*" \)
 fi
