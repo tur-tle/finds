@@ -1,37 +1,59 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# finds - Search for files and directories by name, sorted by time.
+#
+# Author: Turtle Schmiechen
+# Co-Author: ChatGPT (OpenAI)
+#
+# License: MIT License
+#   Permission is hereby granted, free of charge, to any person obtaining a copy
+#   of this software and associated documentation files (the "Software"), to deal
+#   in the Software without restriction, including without limitation the rights
+#   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#   copies of the Software, and to permit persons to whom the Software is
+#   furnished to do so, subject to the following conditions:
+#
+#   The above copyright notice and this permission notice shall be included in
+#   all copies or substantial portions of the Software.
+#
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#   THE SOFTWARE.
+#
+# Description:
+#   Searches for files and directories matching a search term, optionally prints
+#   modification times, and color-codes directories when supported. Always
+#   sorted by newest first.
 
 print_time=false
 search_path=""
 search_term=""
+filename_col_width=60
 
 usage() {
     echo "Usage: $0 [search_term] [path] [-s <term>] [-p <path>] [-t] [-h]"
     echo "  [search_term]   Default search term if -s is not used"
     echo "  [path]          Default path if -p is not used"
     echo "  -s <term>       Search term (overrides positional)"
-    echo "  -p <path>       Search path (overrides positional)"
+    echo "  -p <path]       Search path (overrides positional)"
     echo "  -t              Print modification time"
     echo "  -h              Show this help message"
     exit 1
 }
 
-# First, capture positional args before getopts
+# --- Positional args (back-compat) ---
 pos_args=()
-
 while [[ $# -gt 0 && $1 != -* ]]; do
-    pos_args+=("$1")
-    shift
+    pos_args+=("$1"); shift
 done
+[[ ${#pos_args[@]} -ge 1 ]] && search_term="${pos_args[0]}"
+[[ ${#pos_args[@]} -ge 2 ]] && search_path="${pos_args[1]}"
 
-# Apply positional args if set
-if [ "${#pos_args[@]}" -ge 1 ]; then
-    search_term="${pos_args[0]}"
-fi
-if [ "${#pos_args[@]}" -ge 2 ]; then
-    search_path="${pos_args[1]}"
-fi
-
-# Parse options
+# --- Flags ---
 while getopts "s:p:th" opt; do
     case $opt in
         s) search_term="$OPTARG" ;;
@@ -42,28 +64,60 @@ while getopts "s:p:th" opt; do
     esac
 done
 
-# Default path if unset
-[ -z "$search_path" ] && search_path="."
-
-# Show usage if nothing to search for
-if [ -z "$search_term" ]; then
-    echo "Error: No search term provided."
-    usage
+[[ -z "$search_path" ]] && search_path="."
+if [[ -z "$search_term" ]]; then
+    echo "Error: No search term provided."; usage
 fi
 
 echo "Searching for: \"$search_term\" in \"$search_path\""
 
-# Run find
+# --- Color auto-detect (TTY + >=8 colors) ---
+supports_color=false
+if [[ -t 1 ]]; then
+  if colors=$(tput colors 2>/dev/null); then
+    [[ "$colors" =~ ^[0-9]+$ && "$colors" -ge 8 ]] && supports_color=true
+  else
+    # fallback on TERM hint
+    [[ "$TERM" =~ (xterm|screen|tmux|vt100|linux) ]] && supports_color=true
+  fi
+fi
+
+if $supports_color; then
+  DIR_COLOR=$'\033[1;34m'   # bold blue
+  RESET_COLOR=$'\033[0m'
+else
+  DIR_COLOR=''
+  RESET_COLOR=''
+fi
+
+# Build find: print epoch|path|YYYY-MM-DD HH:MM|type
+# type: f=file, d=dir, l=symlink, etc.
+find_cmd=(
+  find "$search_path"
+  \( \( -type f -iname "*$search_term*" \) -o \( -type d -path "*$search_term*" \) \)
+  -not -path '*/\.*'
+  -printf '%T@|%p|%TY-%Tm-%Td %TH:%TM|%y\n'
+)
 
 if $print_time; then
-    find "$search_path" -iname "*$search_term*" -not -path '*/\.*' -type f \
-        \( ! -iname ".*" \) -printf '%p %TY-%Tm-%Td %TH:%TM\n' \
-    | awk '{
-        file=$1;
-        for (i=2; i<=NF-2; i++) file=file " " $i;
-        printf "%-60s %s %s\n", file, $(NF-1), $NF
-    }'
+  "${find_cmd[@]}" \
+    | sort -nr \
+    | awk -F'|' -v W="$filename_col_width" -v dc="$DIR_COLOR" -v rc="$RESET_COLOR" '
+        {
+          epoch=$1; path=$2; dt=$3; typ=$4;
+          if (typ=="d" && dc!="") {
+            printf "%-*s %s\n", W, dc path rc, dt;
+          } else {
+            printf "%-*s %s\n", W, path, dt;
+          }
+        }'
 else
-    find "$search_path" -iname "*$search_term*" -not -path '*/\.*' -type f \
-        \( ! -iname ".*" \)
+  "${find_cmd[@]}" \
+    | sort -nr \
+    | awk -F'|' -v dc="$DIR_COLOR" -v rc="$RESET_COLOR" '
+        {
+          path=$2; typ=$4;
+          if (typ=="d" && dc!="") { print dc path rc }
+          else { print path }
+        }'
 fi
